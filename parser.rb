@@ -1,70 +1,105 @@
 class UnknownFunctionError < StandardError; end
 class ArityError < StandardError; end
+class NotAListError < StandardError; end
+
+def oskolisp(filename)
+  parse_commands(eval(File.read(filename)))
+  # don't tell me it's unsafe. it's a goddamn programming language.
+  # almost every programming language run unsafe.
+end
+
+def parse_commands(commands, c = {})
+  if commands.count == 1  # last command, we need the results (not the context)
+    tparse(commands[0], c)
+  else
+    parse_commands(commands[1..-1], parse(commands[0], c)[1])
+  end
+end
+
+# just a shortcut when we dont want the context, which is almost everywhere
+# except parse_commands method above
+def tparse(list, c)
+  parse(list, c)[0]
+end
 
 def parse(list, c)
   c = c.dup
   # puts "parsing: #{list}"
   if list.kind_of? Array
+    list[0] = tparse(list[0], c)
     case list[0]
-    when :+
-      require_arity(2, list)
-      parse(list[1], c) + parse(list[2], c)
     when :and
       require_arity(2, list)
-      parse(list[1], c) && parse(list[2], c)
+      [tparse(list[1], c) && tparse(list[2], c), c]
     when :or
       require_arity(2, list)
-      parse(list[1], c) || parse(list[2], c)
+      [tparse(list[1], c) || tparse(list[2], c), c]
     when :not
       require_arity(1, list)
-      !parse(list[1], c)
+      [!parse(list[1], c)[0], c]
     when :*
       require_arity(2, list)
-      parse(list[1], c) * parse(list[2], c)
+      [tparse(list[1], c) * tparse(list[2], c), c]
     when :-
       require_arity(2, list)
-      parse(list[1], c) - parse(list[2], c)
+      [tparse(list[1], c) - tparse(list[2], c), c]
+    when :+
+      require_arity(2, list)
+      [tparse(list[1], c) + tparse(list[2], c), c]
     when :>
       require_arity(2, list)
-      parse(list[1], c) > parse(list[2], c)
+      [tparse(list[1], c) > tparse(list[2], c), c]
     when :<
       require_arity(2, list)
-      parse(list[1], c) < parse(list[2], c)
+      [tparse(list[1], c) < tparse(list[2], c), c]
     when :==
       require_arity(2, list)
-      parse(list[1], c) == parse(list[2], c)
+      [tparse(list[1], c) == tparse(list[2], c), c]
     when :if
       require_arity(3, list)
-      parse(list[1], c) ? parse(list[2], c) : parse(list[3], c)
-    when :time
-      require_arity(0, list)
-      Time.now.to_i
+      [(tparse(list[1], c) ? tparse(list[2], c) : tparse(list[3], c)), c]
     when :list
-      require_arity(1, list)
-      [:list, list[1]]
+      require_arity((1..Float::INFINITY), list)
+      [list, c]
+    when :upto
+      require_arity(2, list)
+      [[:list, *(tparse(list[1], c)..tparse(list[2], c)).to_a], c]
     when :map
       require_arity(2, list)
-      [:list, list_items(list[1], c).map { |i| parse(list[2] + [i], c) }]
+      [[:list, *list_items(list[1], c).map { |i| tparse([list[2], i], c) }], c]
+    when :select
+      require_arity(2, list)
+      [[:list, *list_items(list[1], c).select { |i| tparse([list[2], i], c) }], c]
     when :each
       require_arity(2, list)
-      items = list_items(list[1], c).each { |i| parse(list[2] + [i], c) }
-      [:list, items]
+      items = list_items(list[1], c).each { |i| tparse([list[2], i], c) }
+      [[:list, *items], c]
     when :p
       require_arity(1, list)
-      puts "printing: #{parse(list[1], c)}"
-    when :defun
-      require_arity(1, list)
-      puts "printing: #{parse(list[1], c)}"
-      # TODO: complete
-    when ->(f) { c[:functions].keys.include? f }
-      require_arity(c[:functions][f][:arg_names].count, list)
-      args = Hash[c[:functions][f][:arg_names].zip list[1..list.count]]
-      run_func(c[:functions][f][:defenition], args, c)
-    else
-      raise UnknownFunctionError
+      r = tparse(list[1], c)
+      puts r
+      [r, c]
+    when :lambda # function def
+      require_arity(2, list)
+      [list, c]
+    when ->(f) { f[0] == :lambda} # function call
+      cp = c.dup
+      ar = list_items(list[0][1], cp).zip(list[1..-1])
+      ar.each { |a| cp[a[0]] = tparse(a[1], c) }
+      [tparse(list[0][2], cp), c]
+    when :set
+      require_arity(2, list)
+      cp = c.dup
+      cp[list[1]] = tparse(list[2], c)
+      [list, cp]
     end
   else
-    list
+    case list
+    when ->(f){ c.keys.include? f } # macro...
+      [c[list], c]
+    else
+      [list, c]
+    end
   end
 end
 
@@ -73,13 +108,7 @@ def require_arity(n, list)
 end
 
 def list_items(list, c)
-  r = parse(list, c)
+  r = tparse(list, c)
   raise NotAListError unless r[0] == :list
-  r[1]
-end
-
-def run_func(d, args, c)
-  c = c.dup
-  args.each { |k, v| c[:variables][k] = v }
-  parse(d, c)
+  r[1..-1]
 end
