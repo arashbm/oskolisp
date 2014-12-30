@@ -2,12 +2,6 @@ class UnknownFunctionError < StandardError; end
 class ArityError < StandardError; end
 class NotAListError < StandardError; end
 
-def oskolisp(filename)
-  parse_commands(eval(File.read(filename)))
-  # don't tell me it's unsafe. it's a goddamn programming language.
-  # almost every programming language run unsafe.
-end
-
 def parse_commands(commands, c = {})
   if commands.count == 1  # last command, we need the results (not the context)
     tparse(commands[0], c)
